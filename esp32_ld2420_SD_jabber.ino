@@ -1,13 +1,12 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <time.h>
-#include "SD.h"
-#include "SPI.h"
-#include <IniFile.h>
+#include "settings.h"
 #include <WiFiClientSecure.h>
 #include "driver/rtc_io.h" // power up in sleep
 #include "Xmpp.h"
 #include "LD2420.h"
+#include "debug_str.h"
 
 //blink led
 #define INFO_LED GPIO_NUM_32
@@ -18,7 +17,6 @@
 #define TX_PIN GPIO_NUM_17
 #define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO)  // 2 ^ GPIO_NUMBER in hex
 #define WAKEUP_GPIO GPIO_NUM_4  // Only RTC IO are allowed - ESP32 Pin example
-#define CS_PIN 5
 #define MYTZ "SAMT-4"
 
 static const char root_cert[] PROGMEM = R"EOF(
@@ -55,17 +53,6 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
 
-char Ssid[40];
-char Password[40];
-char NtpServerName[50];
-char Server[30];
-uint16_t Port = 5222;
-char Tz_zone_info[40];
-char Recipient[30];
-char NameSensor[40];
-char PassXmpp[40];
-char Resource[40];
-
 static const char *NameSection = "general";
 const char* Filename = "/settings.ini";
 
@@ -74,44 +61,11 @@ XMPP xmpp;
 // Create instances
 HardwareSerial sensorSerial(2);
 LD2420 radar;  // Use default constructor
+Settings settings;
 
-const uint8_t Flg_debug = 0;
+const uint8_t Flg_debug = 1;
 
-void debug_str( const char* intro, const char* message) 
-{
-  if(Flg_debug)
-  {
-    Serial.printf("%s: %s\n", intro, message);
-	  Serial.flush();
-  }
-}
 
-void debug_str( const char* intro, const uint16_t v) 
-{
-  if(Flg_debug)
-  {
-    Serial.printf("%s: %d\n", intro, v);
-	  Serial.flush();
-  }
-}
-
-void debug_str( const char* intro, const int v, const int v2) 
-{
-  if(Flg_debug)
-  {
-    Serial.printf("%s: %d - %d\n", intro, v, v2);
-	  Serial.flush();
-  }
-}
-
-void debug_str( const char* message) 
-{
-  if(Flg_debug)
-  {
-    Serial.println(message);
-	  Serial.flush();
-  }
-}
 // Detection zones
 struct DetectionZone {
   unsigned int index;
@@ -141,12 +95,11 @@ bool filterFull;
 volatile long filteredDistance;
 volatile unsigned long CurrentIndexZone;
 long oldIndexZone;
-unsigned long WaitNotActive = 60000; // 2 min
 
 void setup_wifi() {
   debug_str("\nConnecting to ");
   WiFi.mode(WIFI_STA); // Set ESP32 to Station mode (to connect to an AP) [1, 6]
-  WiFi.begin(Ssid, Password);
+  WiFi.begin(settings[2].c_str(), settings[3].c_str());
   while (WiFi.status() != WL_CONNECTED) 
   { // Wait for connection
     delay(500);
@@ -174,182 +127,6 @@ void ResetAllZones(void)
   debug_str("All zones cleared");
 }
 
-short initSDCard()
-{
-  if(!SD.begin(CS_PIN))
-  {
-    debug_str("Card Mount Failed");
-    return -1;
-  }
-  uint8_t cardType = SD.cardType();
- 
-  if(cardType == CARD_NONE)
-  {
-    debug_str("No SD card attached");
-    return -2;
-  }
- 
-  debug_str("SD Card Type: ");
-  switch(cardType)
-  {
-    case CARD_MMC: 
-      debug_str("MMC");
-      break;
-    case CARD_SD: 
-      debug_str("SDSC");
-      break;
-    case CARD_SDHC: 
-      debug_str("SDHC");
-      break;
-    default:
-      debug_str("UNKNOWN");
-  }
-  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-  Serial.printf("SD Card Size: %lluMB\n", cardSize);
-  return 0;
-}
-
-void printErrorMessage(uint8_t e, bool eol = true)
-{
-  switch (e) {
-  case IniFile::errorNoError:
-    debug_str("no error");
-    break;
-  case IniFile::errorFileNotFound:
-    debug_str("file not found");
-    break;
-  case IniFile::errorFileNotOpen:
-    debug_str("file not open");
-    break;
-  case IniFile::errorBufferTooSmall:
-    debug_str("buffer too small");
-    break;
-  case IniFile::errorSeekError:
-    debug_str("seek error");
-    break;
-  case IniFile::errorSectionNotFound:
-    debug_str("section not found");
-    break;
-  case IniFile::errorKeyNotFound:
-    debug_str("key not found");
-    break;
-  case IniFile::errorEndOfFile:
-    debug_str("end of file");
-    break;
-  case IniFile::errorUnknownError:
-    debug_str("unknown error");
-    break;
-  default:
-    debug_str("unknown error value");
-    break;
-  }
-  if (eol)
-    Serial.println();
-}
-
-void ReadSettings(void)
-{
-  IniFile ini(Filename);
-  if (!ini.open()) 
-  {
-    debug_str("Ini file does not exist", Filename);
-    digitalWrite( ERROR_LED, HIGH );
-    // Cannot do anything else
-    while (1);
-  }
-  const size_t bufferLen = 100;
-  char buffer[bufferLen];
-    // Check the file is valid. This can be used to warn if any lines
-  // are longer than the buffer.
-  if (!ini.validate(buffer, bufferLen)) 
-  {
-    debug_str("ini file", ini.getFilename());
-    debug_str("not valid", ini.getError());
-    digitalWrite( ERROR_LED, HIGH );
-    // Cannot do anything else
-    while (1);
-  }
-  debug_str("Ini file opened successfully. Reading settings:");
-  
-  if(!ini.getValue(NameSection, "tz_zone_info", buffer, sizeof(buffer)))
-    printErrorMessage(ini.getError());
-  strcpy(Tz_zone_info, buffer);
-  debug_str("Tz_zone_info: %s\n", Tz_zone_info );
-  
-  if( strlen(Tz_zone_info) == 0)
-    strcpy(Tz_zone_info, MYTZ);
-
-  if(!ini.getValue(NameSection, "ssid", buffer, sizeof(buffer)))
-  {
-    printErrorMessage(ini.getError());
-    digitalWrite( ERROR_LED, HIGH );
-  }
-  strcpy(Ssid, buffer);
-  debug_str("Ssid", Ssid );
-  
-  if(!ini.getValue(NameSection, "password", buffer, sizeof(buffer)))
-    printErrorMessage(ini.getError());
-  strcpy(Password, buffer);
-  debug_str("Password", Password );
-  
-  if(!ini.getValue(NameSection, "server", buffer, sizeof(buffer)))
-  {
-    printErrorMessage(ini.getError());
-    digitalWrite( ERROR_LED, HIGH );
-  }
-  strcpy(Server, buffer);
-  debug_str("Server", Server );
-  
-  if(!ini.getValue(NameSection, "name_sensor", buffer, sizeof(buffer)))
-  {
-    printErrorMessage(ini.getError());
-    digitalWrite( ERROR_LED, HIGH );
-  }
-  debug_str("NameSensor", NameSensor);
-  
-  if(!ini.getValue(NameSection, "ntp_server", buffer, sizeof(buffer)))
-  {
-    printErrorMessage(ini.getError());
-    digitalWrite( ERROR_LED, HIGH );
-  }
-  strcpy(NtpServerName, buffer);
-  debug_str("NtpServerName", NtpServerName);
-
-  if(!ini.getValue(NameSection, "recipient", buffer, sizeof(buffer)))
-  {
-    printErrorMessage(ini.getError());
-    digitalWrite( ERROR_LED, HIGH );
-  }
-  strcpy(Recipient, buffer);
-  debug_str("Recipient", Recipient);
-
-  if(!ini.getValue(NameSection, "passxmpp", buffer, sizeof(buffer)))
-  {
-    printErrorMessage(ini.getError());
-    digitalWrite( ERROR_LED, HIGH );
-  }
-  strcpy(PassXmpp, buffer);
-  debug_str("PassXmpp", PassXmpp);
-  
-  if(!ini.getValue(NameSection, "port", buffer, sizeof(buffer), Port))
-  {
-    printErrorMessage(ini.getError());
-    digitalWrite( ERROR_LED, HIGH );
-  }
-  debug_str("Port", Port);
-
-  unsigned long smi;
-  if(!ini.getValue(NameSection, "sleep", buffer, sizeof(buffer), smi))
-    printErrorMessage(ini.getError());
-  else
-  {
-    WaitNotActive = smi * 10000;
-    debug_str("WaitNotActive", WaitNotActive);
-  }
-  // Close the file when done reading
-  ini.close();
-}
-
 // Configuration
 void setup() 
 {
@@ -363,8 +140,12 @@ void setup()
   Serial.begin(115200);
   while (!Serial)
     delay(10);
-  if(initSDCard() == 0)
-    ReadSettings();
+  settings.SetFileName((char *)Filename);
+  if(settings.initSDCard() == 0)
+  {
+    if(settings.ReadSettings(NameSection) < 0 )
+      digitalWrite( ERROR_LED, HIGH );
+  }
   else
     digitalWrite( ERROR_LED, HIGH );
   
@@ -405,7 +186,7 @@ void setup()
   debug_str("Setup complete. Monitoring detection zones...");
   printZoneInfo();
   debug_str("Configure ntp time...");
-  configTzTime(Tz_zone_info, NtpServerName, "time.google.com", "pool.ntp.org");
+  configTzTime(settings[1].c_str(), settings[6].c_str(), "time.google.com", "pool.ntp.org");
   // Wait for time to be set
   while( time(nullptr) < 1510592825 ) 
   { // A timestamp after the function was introduced
@@ -420,8 +201,8 @@ void setup()
   if(Flg_debug)
     xmpp.setSerial(&Serial);
   xmpp.setClient(&client);
-  xmpp.setConnectionData(NameSensor, PassXmpp, Resource, Server, Recipient);
-  if (client.connect(Server, Port)) 
+  xmpp.setConnectionData(settings[5].c_str(), settings[8].c_str(), settings[11].c_str(), settings[4].c_str(), settings[7].c_str());
+  if(client.connect(settings[4].c_str(), settings[9].toInt())) 
   {
     debug_str("Connected to server in plain mode");
     // Send the STARTTLS command
@@ -453,8 +234,8 @@ void SendMessage( const char *message )
   strftime(tempbuffer, sizeof(tempbuffer), "%d.%m.%Y %H:%M:%S", &timeinfo);
   //unsigned long v = analogRead( PWR_PIN );
  
-  snprintf(msg, len_massage, "%s. Время: %s. %s", NameSensor, tempbuffer, message);
-  xmpp.sendMessage(Recipient, msg, "chat");
+  snprintf(msg, len_massage, "%s. Время: %s. %s", settings[5].c_str(), tempbuffer, message);
+  xmpp.sendMessage(settings[7].c_str(), msg, "chat");
 }
 
 const String GetNameZone( unsigned int const &indx)
@@ -505,7 +286,7 @@ void loop()
         flg_woke_up = false;
     oldIndexZone = CurrentIndexZone;
   }
-  if(( RadarActive == LOW ) && CurrentIndexZone >= 3  && (( mil - updateActive ) > WaitNotActive ))
+  if(( RadarActive == LOW ) && CurrentIndexZone >= 3  && (( mil - updateActive ) > settings[10].toInt()))
   {
     digitalWrite( INFO_LED, LOW );
     SendMessage("Я спать." );
@@ -590,12 +371,10 @@ void onDataUpdateEvent(LD2420_Data data) {
   updateCounter++;
   
   // Print data rate every 100 updates
-  if (updateCounter % 100 == 0) {
+  if (updateCounter % 100 == 0) 
+  {
     static unsigned long lastRateCheck = 0;
     unsigned long now = millis();
-    
-    if (lastRateCheck > 0)
-      float rate = 100000.0 / (now - lastRateCheck); // Updates per second
     lastRateCheck = now;
   }
 }
