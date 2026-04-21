@@ -76,6 +76,24 @@ void Settings::printErrorMessage(uint8_t e, bool eol = true)
     Serial.println();
 }
 
+char* Settings::NewValue(int i, const char* v)
+{
+  FreeValue(i);
+  listsetting[i].str = (char*) malloc(strlen(v) + 1);
+  strcpy(listsetting[i].str, v);
+  return listsetting[i].str;
+}
+
+void Settings::FreeValue(int i)
+{
+  if(listsetting[i].str)
+  {
+    Serial.printf("delete\n");
+    free(listsetting[i].str);
+    listsetting[i].str = nullptr;
+  }
+}
+
 short Settings::ReadSettings(const char* ns)
 {
   IniFile ini(FileName);
@@ -98,13 +116,13 @@ short Settings::ReadSettings(const char* ns)
   
   for( int i = 0; i < count_settings; i++)
   {
-    if(!ini.getValue(ns, listsetting[i].name.c_str(), buffer, bufferLen))
+    if(!ini.getValue(ns, listsetting[i].name, buffer, bufferLen))
     {
       printErrorMessage(ini.getError());
       return -2 - i;
     }
-    listsetting[i].value = buffer;
-    debug_str(listsetting[i].name.c_str(), listsetting[i].value.c_str());
+    NewValue(i, buffer);
+    debug_str(listsetting[i].name, listsetting[i].str);
   }
   
   ini.close();

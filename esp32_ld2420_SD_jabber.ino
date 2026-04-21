@@ -97,9 +97,9 @@ volatile unsigned long CurrentIndexZone;
 long oldIndexZone;
 
 void setup_wifi() {
-  debug_str("\nConnecting to ");
+  debug_str("Connecting to ", settings.ToChar(2));
   WiFi.mode(WIFI_STA); // Set ESP32 to Station mode (to connect to an AP) [1, 6]
-  WiFi.begin(settings[2].c_str(), settings[3].c_str());
+  WiFi.begin(settings.ToChar(2), settings.ToChar(3));
   while (WiFi.status() != WL_CONNECTED) 
   { // Wait for connection
     delay(500);
@@ -126,7 +126,6 @@ void ResetAllZones(void)
   }
   debug_str("All zones cleared");
 }
-
 // Configuration
 void setup() 
 {
@@ -134,21 +133,30 @@ void setup()
   pinMode( ERROR_LED, OUTPUT );
   pinMode( WAKEUP_GPIO, INPUT_PULLDOWN );
   digitalWrite( INFO_LED, HIGH);
-  
-  
+  // pause usb redirect network
+  uint32_t pause_net_usb = 100;  
+  while(--pause_net_usb)
+    delay(100);
   // Initialize Serial Monitor
   Serial.begin(115200);
   while (!Serial)
     delay(10);
+  debug_str("init settings...");
   settings.SetFileName((char *)Filename);
   if(settings.initSDCard() == 0)
   {
     if(settings.ReadSettings(NameSection) < 0 )
+    {
       digitalWrite( ERROR_LED, HIGH );
+      while (1) delay(1000);
+    }
   }
   else
+  {
     digitalWrite( ERROR_LED, HIGH );
-  
+    while (1) delay(1000);
+  }
+
   esp_sleep_enable_ext1_wakeup_io(BUTTON_PIN_BITMASK(WAKEUP_GPIO), ESP_EXT1_WAKEUP_ANY_HIGH);
   rtc_gpio_pulldown_en(WAKEUP_GPIO);  // GPIO4 is tie to GND in order to wake up in HIGH
   rtc_gpio_pullup_dis(WAKEUP_GPIO);   // Disable PULL_UP in order to allow it to wakeup on HIGH
@@ -178,15 +186,14 @@ void setup()
   
   // Set up callbacks
   radar.onDetection(onDetectionEvent);
-  radar.onDataUpdate(onDataUpdateEvent);
-  
+    
   // Initialize filter
   initializeFilter();
   
   debug_str("Setup complete. Monitoring detection zones...");
   printZoneInfo();
   debug_str("Configure ntp time...");
-  configTzTime(settings[1].c_str(), settings[6].c_str(), "time.google.com", "pool.ntp.org");
+  configTzTime(settings.ToChar(1), settings.ToChar(6), "time.google.com", "pool.ntp.org");
   // Wait for time to be set
   while( time(nullptr) < 1510592825 ) 
   { // A timestamp after the function was introduced
@@ -194,6 +201,11 @@ void setup()
     Serial.print("*");
   }
   debug_str("\nTime synchronized");
+
+  pause_net_usb = 10;
+  while(--pause_net_usb)
+    delay(100);
+
   client.setCACert(root_cert);
   // Inform the library that we want to start in plain text mode first
   client.setInsecure(); 
@@ -201,8 +213,13 @@ void setup()
   if(Flg_debug)
     xmpp.setSerial(&Serial);
   xmpp.setClient(&client);
-  xmpp.setConnectionData(settings[5].c_str(), settings[8].c_str(), settings[11].c_str(), settings[4].c_str(), settings[7].c_str());
-  if(client.connect(settings[4].c_str(), settings[9].toInt())) 
+  debug_str(settings.ToChar(5));
+  debug_str(settings.ToChar(8));
+  debug_str(settings.ToChar(11));
+  debug_str(settings.ToChar(4));
+  debug_str(settings.ToChar(7));
+  xmpp.setConnectionData(settings.ToChar(5), settings.ToChar(8), settings.ToChar(11), settings.ToChar(4), settings.ToChar(7));
+  if(client.connect(settings.ToChar(4), settings.ToInt(9))) 
   {
     debug_str("Connected to server in plain mode");
     // Send the STARTTLS command
@@ -234,8 +251,8 @@ void SendMessage( const char *message )
   strftime(tempbuffer, sizeof(tempbuffer), "%d.%m.%Y %H:%M:%S", &timeinfo);
   //unsigned long v = analogRead( PWR_PIN );
  
-  snprintf(msg, len_massage, "%s. Время: %s. %s", settings[5].c_str(), tempbuffer, message);
-  xmpp.sendMessage(settings[7].c_str(), msg, "chat");
+  snprintf(msg, len_massage, "%s. Время: %s. %s", settings.ToChar(5), tempbuffer, message);
+  xmpp.sendMessage(settings.ToChar(7), msg, "chat");
 }
 
 const String GetNameZone( unsigned int const &indx)
@@ -286,7 +303,7 @@ void loop()
         flg_woke_up = false;
     oldIndexZone = CurrentIndexZone;
   }
-  if(( RadarActive == LOW ) && CurrentIndexZone >= 3  && (( mil - updateActive ) > settings[10].toInt()))
+  if(( RadarActive == LOW ) && CurrentIndexZone >= 3  && (( mil - updateActive ) > settings.ToInt(10)))
   {
     digitalWrite( INFO_LED, LOW );
     SendMessage("Я спать." );
@@ -356,27 +373,11 @@ void onDetectionEvent(int distance)
 {
   filteredDistance = addToFilter(distance);
   
-//  Serial.print("Raw: ");
-//  Serial.print(distance);
-//  Serial.print(" cm, Filtered: ");
-//  Serial.print(filteredDistance);
-//  Serial.println(" cm");
-}
-
-void onDataUpdateEvent(LD2420_Data data) {
-  // This callback gets called for every data update
-  // Use it for continuous monitoring or logging
-  
-  static unsigned long updateCounter = 0;
-  updateCounter++;
-  
-  // Print data rate every 100 updates
-  if (updateCounter % 100 == 0) 
-  {
-    static unsigned long lastRateCheck = 0;
-    unsigned long now = millis();
-    lastRateCheck = now;
-  }
+  //Serial.print("Raw: ");
+  //Serial.print(distance);
+  //Serial.print(" cm, Filtered: ");
+  //Serial.print(filteredDistance);
+  //Serial.println(" cm");
 }
 
 // Convert detection state to string
