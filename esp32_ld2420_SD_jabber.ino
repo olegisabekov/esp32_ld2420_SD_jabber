@@ -147,6 +147,17 @@ void setup()
   settings.SetFileName((char *)Filename);
   if(settings.initSDCard() == 0)
   {
+    settings.Add(1, "tz_zone_info");
+    settings.Add(2, "ssid");
+    settings.Add(3, "password");
+    settings.Add(4, "server");
+    settings.Add(5, "name_sensor");
+    settings.Add(6, "ntp_server");
+    settings.Add(7, "recipient");
+    settings.Add(8, "passxmpp");
+    settings.Add(9, "port");
+    settings.Add(10, "sleep");
+    settings.Add(11, "resource");
     if(settings.Read(NameSection) < 0 )
     {
       digitalWrite( ERROR_LED, HIGH );

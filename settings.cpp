@@ -75,33 +75,40 @@ void Settings::printErrorMessage(uint8_t e, bool eol = true)
   if (eol)
     Serial.println();
 }
-short Settings::Add(const uint16_t &index, const char *name)
+short Settings::Add(const uint8_t &index, const char *name)
 {
+  if(count >= max_settings)
+    return -1;
+  listdata[count].index = index;
+  listdata[count].name = (char *)malloc(strlen(name) + 1);
+  listdata[count].val_type = Value_type::empty;
+  strcpy((char *)listdata[count].name, name);
+  count++;
   return 0;
 }
-void Settings::NewValue(int i, const char* v)
+void Settings::NewValue(uint8_t i, const char* v)
 {
-  Free(i);
+  FreeValue(i);
   listdata[i].value = malloc(strlen(v) + 1);
   listdata[i].val_type = Value_type::simbol;
   strcpy((char *)listdata[i].value, v);
 }
 
-void Settings::NewValue(int i, const int v)
+void Settings::NewValue(uint8_t i, const int v)
 {
-  Free(i);
+  FreeValue(i);
   listdata[i].value = malloc(sizeof(v));
   *((int* )listdata[i].value) = v;
   listdata[i].val_type = Value_type::number;
 }
 
-void Settings::Free(int i)
+void Settings::FreeValue(uint8_t i)
 {
   if(listdata[i].value)
   {
     free(listdata[i].value);
     listdata[i].value = nullptr;
-    listdata[i].val_type = Value_type::none;
+    listdata[i].val_type = Value_type::empty;
   }
 }
 
@@ -113,7 +120,7 @@ short Settings::Read(const char* ns)
     debug_str("Ini file does not exist", FileName);
     return -1;
   }
-  const size_t bufferLen = 100;
+  const size_t bufferLen = 150;
   char buffer[bufferLen];
     // Check the file is valid. This can be used to warn if any lines
   // are longer than the buffer.
@@ -125,7 +132,7 @@ short Settings::Read(const char* ns)
   }
   debug_str("Ini file opened successfully. Reading settings:");
   
-  for(uint16_t i = 0; i < count_settings; i++)
+  for(uint8_t i = 0; i < count; i++)
   {
     if(!ini.getValue(ns, listdata[i].name, buffer, bufferLen))
     {
@@ -145,7 +152,6 @@ short Settings::Read(const char* ns)
 		    NewValue(i, tmp);
         debug_str(listdata[i].name, ToInt(listdata[i].index));
 	    }
-    
   }
   ini.close();
   return 0;
