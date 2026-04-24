@@ -19,6 +19,7 @@ private:
   {
     uint8_t index;
     const char* name;
+    const char* defvalue = nullptr;
     void* value = nullptr;
     Value_type val_type = Value_type::none;
   };
@@ -26,7 +27,9 @@ private:
   void NewValue(uint8_t, const char*);
   void NewValue(uint8_t, const int);
   void FreeValue(uint8_t);
-  void printErrorMessage(uint8_t , bool );
+#ifdef TESTMODE
+  void printErrorMessage(uint8_t);
+#endif
 public:
   Settings() {;};
   Settings(char* fn) { FileName = fn; };
@@ -40,6 +43,7 @@ public:
   }
   short initSDCard(void);
   short Add(const uint8_t &, const char *);
+  short Add(const uint8_t &, const char *, const char *);
   short Read(const char *);
   const char* ToChar(const uint8_t& index)
   {

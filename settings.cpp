@@ -1,3 +1,4 @@
+#include <cstring>
 #include "settings.h"
 #include "debug_str.h"
 
@@ -37,8 +38,8 @@ short Settings::initSDCard(void)
   Serial.printf("SD Card Size: %lluMB\n", cardSize);
   return 0;
 }
-
-void Settings::printErrorMessage(uint8_t e, bool eol = true)
+#ifdef TESTMODE
+void Settings::printErrorMessage(uint8_t e)
 {
   switch (e) {
   case IniFile::errorNoError:
@@ -72,9 +73,8 @@ void Settings::printErrorMessage(uint8_t e, bool eol = true)
     debug_str("unknown error value");
     break;
   }
-  if (eol)
-    Serial.println();
 }
+#endif
 short Settings::Add(const uint8_t &index, const char *name)
 {
   if(count >= max_settings)
@@ -83,6 +83,22 @@ short Settings::Add(const uint8_t &index, const char *name)
   listdata[count].name = (char *)malloc(strlen(name) + 1);
   listdata[count].val_type = Value_type::empty;
   strcpy((char *)listdata[count].name, name);
+  count++;
+  return 0;
+}
+short Settings::Add(const uint8_t &index, const char *name, const char* defvalue)
+{
+  if(count >= max_settings)
+    return -1;
+  listdata[count].index = index;
+  listdata[count].name = (char *)malloc(strlen(name) + 1);
+  listdata[count].val_type = Value_type::empty;
+  strcpy((char *)listdata[count].name, name);
+  if(defvalue)
+  {
+    listdata[count].defvalue = (char *)malloc(strlen(defvalue) + 1);
+    strcpy((char *)listdata[count].defvalue, defvalue);
+  }
   count++;
   return 0;
 }
@@ -136,21 +152,35 @@ short Settings::Read(const char* ns)
   {
     if(!ini.getValue(ns, listdata[i].name, buffer, bufferLen))
     {
+      #ifdef TESTMODE
       printErrorMessage(ini.getError());
-      return -2 - i;
+      #endif
+      if(listdata[i].defvalue)
+      {
+        #ifdef TESTMODE
+        debug_str("set default");
+        #endif
+        strcpy(buffer, listdata[i].defvalue);
+      }
+      else
+        return -2 - i;
     }
     char *endptr;
 	  int tmp = strtoul(buffer, &endptr, 10);
 	  if(endptr == buffer) //string
     {
       NewValue(i, buffer);
+      #ifdef TESTMODE
       debug_str(listdata[i].name, ToChar(listdata[i].index));
+      #endif
     }
     else
 	    if(*endptr == '\0') //number
       {
 		    NewValue(i, tmp);
+        #ifdef TESTMODE
         debug_str(listdata[i].name, ToInt(listdata[i].index));
+        #endif
 	    }
   }
   ini.close();

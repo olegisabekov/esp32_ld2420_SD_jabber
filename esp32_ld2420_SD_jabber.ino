@@ -1,11 +1,11 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <time.h>
-#include "settings.h"
 #include <WiFiClientSecure.h>
 #include "driver/rtc_io.h" // power up in sleep
-#include "Xmpp.h"
 #include "LD2420.h"
+#include "Xmpp.h"
+#include "settings.h"
 #include "debug_str.h"
 
 //blink led
@@ -128,36 +128,24 @@ void ResetAllZones(void)
   }
   debug_str("All zones cleared");
 }
-// Configuration
-void setup() 
+void ReadSettings(void)
 {
-  pinMode( INFO_LED, OUTPUT );
-  pinMode( ERROR_LED, OUTPUT );
-  pinMode( WAKEUP_GPIO, INPUT_PULLDOWN );
-  digitalWrite( INFO_LED, HIGH);
-  // pause usb redirect network
-  uint32_t pause_net_usb = 100;  
-  while(--pause_net_usb)
-    delay(10);
-  // Initialize Serial Monitor
-  Serial.begin(115200);
-  while (!Serial)
-    delay(10);
   debug_str("init settings...");
   settings.SetFileName((char *)Filename);
   if(settings.initSDCard() == 0)
   {
-    settings.Add(1, "tz_zone_info");
+    settings.Add(1, "tz_zone_info", "SAMT-4");
     settings.Add(2, "ssid");
     settings.Add(3, "password");
     settings.Add(4, "server");
     settings.Add(5, "name_sensor");
-    settings.Add(6, "ntp_server");
+    settings.Add(6, "ntp_server", "0.ru.pool.ntp.org");
     settings.Add(7, "recipient");
     settings.Add(8, "passxmpp");
-    settings.Add(9, "port");
-    settings.Add(10, "sleep");
-    settings.Add(11, "resource");
+    settings.Add(9, "port", "5222");
+    settings.Add(10, "sleep", "4");
+    settings.Add(11, "resource", "esp32-aaa");
+    settings.Add(12, "alarm_zone", "5");
     if(settings.Read(NameSection) < 0 )
     {
       digitalWrite( ERROR_LED, HIGH );
@@ -169,6 +157,32 @@ void setup()
     digitalWrite( ERROR_LED, HIGH );
     while (1) delay(1000);
   }
+  if( settings.ToInt(12) > NUM_ZONES || settings.ToInt(12) < 1 )
+  {
+    debug_str("alarm zone number goes beyond!");  
+    digitalWrite( ERROR_LED, HIGH );
+    while (1) delay(1000);
+  }
+}
+// Configuration
+void setup() 
+{
+  pinMode( INFO_LED, OUTPUT );
+  pinMode( ERROR_LED, OUTPUT );
+  pinMode( WAKEUP_GPIO, INPUT_PULLDOWN );
+  digitalWrite( INFO_LED, HIGH);
+  #ifdef TESTMODE
+  // pause usb redirect network
+  uint32_t pause_net_usb = 100;  
+  while(--pause_net_usb)
+    delay(10);
+  #endif
+  // Initialize Serial Monitor
+  Serial.begin(115200);
+  while (!Serial)
+    delay(10);
+  
+  ReadSettings();
 
   esp_sleep_enable_ext1_wakeup_io(BUTTON_PIN_BITMASK(WAKEUP_GPIO), ESP_EXT1_WAKEUP_ANY_HIGH);
   rtc_gpio_pulldown_en(WAKEUP_GPIO);  // GPIO4 is tie to GND in order to wake up in HIGH
@@ -182,7 +196,7 @@ void setup()
   filteredDistance = 0;
   CurrentIndexZone = 0;
   sensorSerial.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
-  debug_str("SoftwareSerial initialized on RX:%d, TX:%d\n", RX_PIN, TX_PIN);
+  debug_str("SoftwareSerial initialized on RX, TX", RX_PIN, TX_PIN);
   
   // Initialize the radar sensor
   if (radar.begin(sensorSerial)) 
@@ -202,9 +216,10 @@ void setup()
     
   // Initialize filter
   initializeFilter();
-  
+  #ifdef TESTMODE
   debug_str("Setup complete. Monitoring detection zones...");
   printZoneInfo();
+  #endif
   debug_str("Configure ntp time...");
   configTzTime(settings.ToChar(1), settings.ToChar(6), "time.google.com", "pool.ntp.org");
   // Wait for time to be set
@@ -224,11 +239,13 @@ void setup()
   if(Xmpp_debug)
     xmpp.setSerial(&Serial);
   xmpp.setClient(&client);
+  #ifdef TESTMODE
   debug_str(settings.ToChar(5));
   debug_str(settings.ToChar(8));
   debug_str(settings.ToChar(11));
   debug_str(settings.ToChar(4));
   debug_str(settings.ToChar(7));
+  #endif
   xmpp.setConnectionData(settings.ToChar(5), settings.ToChar(8), settings.ToChar(11), settings.ToChar(4), settings.ToChar(7));
   if(client.connect(settings.ToChar(4), settings.ToInt(9)))
   {
@@ -283,7 +300,7 @@ void loop()
   static bool flg_woke_up = false;
   int RadarActive = digitalRead(GPIO_NUM_4);
   unsigned long mil = millis();
-
+  
   // Update radar readings
   radar.update();
 
@@ -294,6 +311,7 @@ void loop()
     // Check zone status
     updateZones();
   }
+  
   if( oldIndexZone != CurrentIndexZone )
   {
     debug_str("oldIndexZone", oldIndexZone);
@@ -304,7 +322,9 @@ void loop()
       SendMessage("Разбудили, нарушение периметра охраны." );
     }
     else
-      if( oldIndexZone == 5 && CurrentIndexZone == 4 && flg_woke_up == false)
+    {
+      long isz = settings.ToInt(12);
+      if( oldIndexZone == isz && CurrentIndexZone == isz - 1 && flg_woke_up == false)
       {
         String str = "Нарушение периметра охраны. Расстояние: ";
         str += GetNameZone(CurrentIndexZone);
@@ -312,6 +332,7 @@ void loop()
       }
       else
         flg_woke_up = false;
+    }
     oldIndexZone = CurrentIndexZone;
   }
   if(RadarActive == LOW && CurrentIndexZone >= 3  && ((mil - updateActive) > (settings.ToInt(10) * 60000)))
@@ -400,7 +421,7 @@ String stateToString(LD2420_DetectionState state) {
     default: return "Unknown";
   }
 }
-
+#ifdef TESTMODE
 // Print zone information
 void printZoneInfo() {
   debug_str("=== Detection Zones ===");
@@ -408,3 +429,4 @@ void printZoneInfo() {
     debug_str(zones[i].name.c_str(), zones[i].minDistance, zones[i].maxDistance);
   debug_str("=====================");
 }
+#endif
