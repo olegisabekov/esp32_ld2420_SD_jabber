@@ -23,3 +23,6 @@
 
 [esp32_ld2420_sd.PDF](https://github.com/user-attachments/files/26384752/esp32_ld2420_sd.PDF)
 
+# Debug version
+
+<img width="2202" height="1943" alt="IMG_20260424_183250_crop" src="https://github.com/user-attachments/assets/784ea321-9a4d-46e6-8794-0764bc25170c" />
