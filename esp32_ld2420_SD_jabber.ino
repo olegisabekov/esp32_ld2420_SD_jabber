@@ -269,18 +269,26 @@ void setup()
 void SendMessage( const char *message )
 {
   debug_str("SendMessage");
-  const uint16_t len_massage = 400;
-  char tempbuffer[200];
-  char msg[len_massage];
-  digitalWrite( INFO_LED, HIGH);
-  struct tm timeinfo;
-  if(!getLocalTime(&timeinfo))
-    debug_str("Failed to obtain time");
-  strftime(tempbuffer, sizeof(tempbuffer), "%d.%m.%Y %H:%M:%S", &timeinfo);
-  //unsigned long v = analogRead( PWR_PIN );
- 
-  snprintf(msg, len_massage, "%s. Время: %s. %s", settings.ToChar(5), tempbuffer, message);
-  xmpp.sendMessage(settings.ToChar(7), msg, "chat");
+  if(client.connected())
+  {
+    const uint16_t len_massage = 400;
+    char tempbuffer[200];
+    char msg[len_massage];
+    digitalWrite( INFO_LED, HIGH);
+    struct tm timeinfo;
+    if(!getLocalTime(&timeinfo))
+      debug_str("Failed to obtain time");
+    strftime(tempbuffer, sizeof(tempbuffer), "%d.%m.%Y %H:%M:%S", &timeinfo);
+    //unsigned long v = analogRead( PWR_PIN );
+    snprintf(msg, len_massage, "%s. Время: %s. %s", settings.ToChar(5), tempbuffer, message);
+    xmpp.sendMessage(settings.ToChar(7), msg, "chat");
+  }
+  else
+  {
+    digitalWrite( ERROR_LED, HIGH );
+    debug_str("Not connected server, restart.");
+    ESP.restart();
+  }
 }
 
 const String GetNameZone( unsigned int const &indx)
@@ -297,7 +305,6 @@ void loop()
 {
   static unsigned long updateRadar = 0;
   static unsigned long updateActive = 0;
-  static bool flg_woke_up = false;
   int RadarActive = digitalRead(GPIO_NUM_4);
   unsigned long mil = millis();
   
@@ -314,37 +321,34 @@ void loop()
   
   if( oldIndexZone != CurrentIndexZone )
   {
+    long isz = settings.ToInt(12);
     debug_str("oldIndexZone", oldIndexZone);
     debug_str("CurrentIndexZone", CurrentIndexZone);
-    if( oldIndexZone == -1 )
+    if(oldIndexZone == -1)
+      SendMessage("Разбудили, тут кто-то есть." );
+    if(oldIndexZone == isz && CurrentIndexZone == isz - 1)
     {
-      flg_woke_up = true;
-      SendMessage("Разбудили, нарушение периметра охраны." );
-    }
-    else
-    {
-      long isz = settings.ToInt(12);
-      if( oldIndexZone == isz && CurrentIndexZone == isz - 1 && flg_woke_up == false)
-      {
-        String str = "Нарушение периметра охраны. Расстояние: ";
-        str += GetNameZone(CurrentIndexZone);
-        SendMessage(str.c_str());
-      }
-      else
-        flg_woke_up = false;
+      String str = "Нарушение периметра охраны. Расстояние: ";
+      str += GetNameZone(CurrentIndexZone);
+      SendMessage(str.c_str());
     }
     oldIndexZone = CurrentIndexZone;
   }
-  if(RadarActive == LOW && CurrentIndexZone >= 3  && ((mil - updateActive) > (settings.ToInt(10) * 60000)))
+  if(RadarActive == LOW)
   {
-    digitalWrite( INFO_LED, LOW );
-    SendMessage("Я спать." );
-    debug_str("Sleeping ......");
-    delay( 200 );
-    wifi_off();
-    esp_deep_sleep_start();
+    if((mil - updateActive) > (settings.ToInt(10) * 60000))
+    {
+      digitalWrite( INFO_LED, LOW );
+      SendMessage("Я спать." );
+      debug_str("Sleeping ......");
+      uint32_t pause = 100;  
+      while(--pause)
+        delay(20);
+      wifi_off();
+      esp_deep_sleep_start();
+    }
   }
-  if( RadarActive == HIGH )
+  else
     updateActive = mil;
 }
 // Initialize the distance filter
